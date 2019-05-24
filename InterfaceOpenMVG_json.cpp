@@ -325,6 +325,7 @@ namespace OPT {
 #ifdef _USE_OPENMVG
 bool bOpenMVGjson; // new import format
 #endif
+bool bopenMVS2Json;
 bool bOpenMVS2OpenMVG; // conversion direction
 bool bNormalizeIntrinsics;
 String strListFileName;
@@ -483,7 +484,58 @@ int main(int argc, LPCTSTR* argv)
 		return EXIT_FAILURE;
 
 	TD_TIMER_START();
+	if (OPT::bopenMVS2json){
+		MVS::Scene scene(OPT::nMaxThreads);
+		if (!scene.Load(MAKE_PATH_SAFE(OPT::strInputFileName)))
+			return EXIT_FAILURE;
+		// convert data from OpenMVS to Json
+    	openMVS::MVS_IO::SfM_Scene sceneBAF;
+    	FOREACH(p, scene.platforms) {
+			const MVS::Platform& platform = scene.platforms[p];
+			if (platform.cameras.GetSize() != 1) {
+				LOG("error: unsupported scene structure");
+				return EXIT_FAILURE;
+			}
+			const MVS::Platform::Camera& camera = platform.cameras[0];
+			openMVS::MVS_IO::Camera cameraBAF;
+			cameraBAF.K = camera.K;
+			sceneBAF.cameras.push_back(cameraBAF);
+		}
+		FOREACH(i, scene.images) {
+			const MVS::Image& image = scene.images[i];
+			const MVS::Platform& platform = scene.platforms[image.platformID];
+			const MVS::Platform::Pose& pose = platform.poses[image.poseID];
+			openMVS::MVS_IO::Image imageBAF;
+			imageBAF.name = image.name;
+			imageBAF.name = MAKE_PATH_REL(WORKING_FOLDER_FULL, imageBAF.name);
+			imageBAF.id_camera = image.platformID;
+			imageBAF.id_pose = (uint32_t)sceneBAF.poses.size();
+			sceneBAF.images.push_back(imageBAF);
+			openMVS::MVS_IO::Pose poseBAF;
+			poseBAF.R = pose.R;
+			poseBAF.C = pose.C;
+			sceneBAF.poses.push_back(poseBAF);
+		}
+		sceneBAF.vertices.reserve(scene.pointcloud.points.GetSize());
+		FOREACH(p, scene.pointcloud.points) {
+			const MVS::PointCloud::Point& point = scene.pointcloud.points[p];
+			openMVS::MVS_IO::Vertex vertexBAF;
+			vertexBAF.X = ((const MVS::PointCloud::Point::EVec)point).cast<REAL>();
+			const MVS::PointCloud::ViewArr& views = scene.pointcloud.pointViews[p];
+			FOREACH(v, views) {
+				unsigned viewBAF = views[(uint32_t)v];
+				vertexBAF.views.push_back(viewBAF);
+			}
+			sceneBAF.vertices.push_back(vertexBAF);
+		}
 
+		// write json input data
+		const String strOutputFileNameMVG2(OPT::strOutputFileName + MVG2_EXT);
+		openMVS::MVS_IO::ExportScene(MAKE_PATH_SAFE(OPT::strListFileName), MAKE_PATH_SAFE(strOutputFileNameMVG2), sceneBAF);
+
+		VERBOSE("Input data exported: %u cameras & %u poses & %u images & %u vertices (%s)", sceneBAF.cameras.size(), sceneBAF.poses.size(), sceneBAF.images.size(), sceneBAF.vertices.size(), TD_TIMER_GET_FMT().c_str());
+	} else {
+		
 	if (OPT::bOpenMVS2OpenMVG) {
 		// read OpenMVS input data
 		MVS::Scene scene(OPT::nMaxThreads);
